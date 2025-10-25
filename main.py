@@ -1,9 +1,14 @@
+
 from pyexpat import features
 import nfl_data_py as nfl
 import nflreadpy as nflr
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import joblib
+import os
+import datetime
+import csv
 
 # Suppress warnings
 import warnings
@@ -23,13 +28,28 @@ from sklearn.pipeline import Pipeline
 import xgboost as xgb
 
 
-class NFLPredictor:
+class Model_Package:
+    def __init__(self,
+                 package_label,
+                 model_name,
+                 model,
+                 model_features,
+                 model_scores,
+                 dataset_used,
+                 target_column):
+        
+        self.label = package_label
+        self.model_name = model_name
+        self.model = model
+        self.model_features = model_features
+        self.model_scores = model_scores
+        self.dataset_used = dataset_used
+        self.target_column = target_column
+
+class NFL_Predictor:
     def __init__(self, current_season=2025):
-        self.models = {}
-        self.model_features = {} # Model name -> list of features
-        self.final_model = None
+        self.available_models = ['random_forest', 'gradient_boosting', 'decision_tree', 'logistic_regression', 'xgboost']
         self.current_season = current_season
-        self.dataset = pd.DataFrame()
     
 
     def import_data(self, start_year=2014, end_year=2025):
@@ -71,7 +91,10 @@ class NFLPredictor:
 
         return weekly_data, team_dict, schedule_data
 
-    def create_team_features(self, weekly_data, season, week):
+    def create_team_features(self, 
+                             weekly_data, 
+                             season, 
+                             week):
         
         season_data = weekly_data[(weekly_data['season'] == season) & (weekly_data['week'] < week)]
 
@@ -116,7 +139,11 @@ class NFLPredictor:
 
         return team_features
 
-    def create_game_features(self, team_features, home_team, away_team, season, week, is_playoff=False, is_neutral=False):
+    def create_game_features(self, 
+                             team_features, 
+                             home_team, away_team, 
+                             season, week, 
+                             is_playoff=False, is_neutral=False):
         
         if home_team not in team_features or away_team not in team_features:
             return None
@@ -179,8 +206,10 @@ class NFLPredictor:
         }
 
         return game_features
-
-    def create_dataset(self, weekly_data, schedule_data, save_data=True):
+    
+    def create_dataset(self, 
+                       weekly_data, schedule_data):
+        
         dataset = []
 
         for _, game in schedule_data.iterrows():
@@ -208,263 +237,306 @@ class NFLPredictor:
             game_features = self.create_game_features(team_features, home_team, away_team, season, week, is_playoff)
             if game_features is None:
                 continue
+                
+            if away_score + spread == home_score:
+                home_spread_covered = 1 # Push
+            elif away_score + spread < home_score:
+                home_spread_covered = 2 # Home team covers
+            else:
+                home_spread_covered = 0 # Away team covers
 
+            game_features['home_spread_covered'] = home_spread_covered
             game_features['home_win'] = 1 if home_score > away_score else 0
             game_features['home_rest'] = home_rest
             game_features['away_rest'] = away_rest
-            #game_features['game_id'] = game['game_id']
+            game_features['game_id'] = game['game_id']
             game_features['spread'] = spread
 
             dataset.append(game_features)
 
-        if save_data:
-            self.dataset = pd.DataFrame(dataset)
-            self.dataset.to_csv('nfl_game_dataset.csv', index=False)
-            print("Dataset saved to nfl_game_dataset.csv")
-        return pd.DataFrame(dataset)
+        # Convert dataset to DataFrame and return it
+        dataset_df = pd.DataFrame(dataset)
+        return dataset_df
+    
+    def dataset_df_to_csv(self, 
+                        dataset_df, 
+                        file_name=None):
+        
+        # Set default file name if not provided
+        if file_name is None:
+            file_name = f'nfl_game_dataset_{datetime.now().strftime("%Y%m%d")}.csv'
+
+        # Save dataset to CSV
+        try:
+            with open(file_name, 'w', newline='') as csvfile:
+                dataset_df.to_csv(path_or_buf=csvfile, index=False)
+                print(f"Dataset saved to {file_name}")
+                return csvfile
+        except Exception as e:
+            print(f"Error saving dataset to file: {e}")
+
 
     def select_features(self, 
                         X_train, y_train,
                         min_features=5, 
-                        models=['Gradient Boosting', 'Decision Tree', 'Random Forest', 'Logistic Regression', 'XGBoost']):
-        
-        # Dict for storing selected features for each model
-        model_features = {}
+                        model_name = 'random_forest'):
 
-        # Using RFECV to find optimal feature set for each model
-        print(f'Selecting features using RFECV with minimum {min_features} features...')
-        for model in models:
-            # Make sure model is recognized
-            if model not in ['Gradient Boosting', 'Decision Tree', 'Random Forest', 'Logistic Regression', 'XGBoost']:
-                print(f"Model {model} not recognized. Skipping.")
-                continue
+        # List for storing selected features for model
+        model_features = []
 
-            if model == 'Gradient Boosting':
-                estimator = GradientBoostingClassifier(
-                    n_estimators=100,
-                    learning_rate=0.1,
-                    max_depth=3,
-                    random_state=42
-                )
-            elif model == 'Decision Tree':
-                estimator = DecisionTreeClassifier(
-                    max_depth=5,
-                    random_state=42
-                )
-            elif model == 'Random Forest':
-                estimator = RandomForestClassifier(
-                    n_estimators=100,
-                    max_depth=5,
-                    random_state=42
-                )
-            elif model == 'Logistic Regression':
-                estimator = LogisticRegression(
-                    max_iter=1000,
-                    random_state=42
-                )
-            elif model == 'XGBoost':
-                estimator = xgb.XGBClassifier(
-                    n_estimators=100,
-                    learning_rate=0.1,
-                    max_depth=3,
-                    random_state=42,
-                    verbosity=0
-                )
+        # Using RFECV to find optimal feature set for model
+        print(f'Selecting features for {model_name} model using RFECV with minimum {min_features} features...')
 
-            # Define cross-validation strategy
-            cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2, random_state=42)
+        # Make sure model is recognized
+        if model_name not in self.available_models:
+            print(f"Model {model_name} not recognized. Skipping.")
+            return []
 
-            # Perform RFECV
-            print(f"Selecting features using {model}...")
-            rfecv = RFECV(
-                estimator=estimator,
-                step=1,
-                cv=cv,
-                scoring='accuracy',
-                min_features_to_select=min_features,
-                n_jobs=1
+        if model_name == 'gradient_boosting':
+            estimator = GradientBoostingClassifier(
+                n_estimators=100,
+                learning_rate=0.1,
+                max_depth=3,
+                random_state=42
             )
-            rfecv.fit(X_train, y_train)
+        elif model_name == 'decision_tree':
+            estimator = DecisionTreeClassifier(
+                max_depth=5,
+                random_state=42
+            )
+        elif model_name == 'random_forest':
+            estimator = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=5,
+                random_state=42
+            )
+        elif model_name == 'logistic_regression':
+            estimator = LogisticRegression(
+                max_iter=1000,
+                random_state=42
+            )
+        elif model_name == 'xgboost':
+            estimator = xgb.XGBClassifier(
+                n_estimators=100,
+                learning_rate=0.1,
+                max_depth=3,
+                random_state=42,
+                verbosity=0
+            )
 
-            selected_features = X_train.columns[rfecv.support_].tolist()
-            model_features[model] = selected_features
-            print(f"{model}: Selected {len(selected_features)} features.")
+        # Define cross-validation strategy
+        cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2, random_state=42)
 
-        self.model_features = model_features
+        # Perform RFECV
+        print(f"Selecting features for {model_name} model...")
+        rfecv = RFECV(
+            estimator=estimator,
+            step=1,
+            cv=cv,
+            scoring='accuracy',
+            min_features_to_select=min_features,
+            n_jobs=1
+        )
+        rfecv.fit(X_train, y_train)
+
+        # Print and return selected features
+        selected_features = X_train.columns[rfecv.support_].tolist()
+        model_features = selected_features
+        print(f"{model_name}: Selected {len(selected_features)} features.")
+        print(f"Features: {selected_features}")
+
         return model_features
+    
+    def tune_model(self, 
+                   X_train, y_train, X_test, y_test,
+                   model_features,
+                   model_name='random_forest'):
 
-    def train_and_compare_models(self, 
+        # Make sure model is available
+        if model_name not in self.available_models:
+            print(f"Model {model_name} not recognized. Skipping.")
+            return None
+
+        # Reformat feature set to selected features for given model
+        X_train_selected = X_train[model_features[model_name]]
+        X_test_selected = X_test[model_features[model_name]]
+
+        # Select base model
+        if model_name == 'gradient_boosting':
+            model = GradientBoostingClassifier(random_state=42)
+            param_grid = {
+                'n_estimators': [200, 300, 400, 500],
+                'learning_rate': [0.01, 0.1, 0.2],
+                'max_depth': [8, 9, 10, 11, 12]
+            }
+        elif model_name == 'decision_tree':
+            model = DecisionTreeClassifier(random_state=42)
+            param_grid = {
+                'criterion': ['gini', 'entropy'],
+                'max_depth': [5, 10, 15, 20, 25],
+                'min_samples_split': [2, 5, 10, 20],
+                'min_samples_leaf': [1, 2, 5, 10]
+            }
+        elif model_name == 'random_forest':
+            model = RandomForestClassifier(random_state=42)
+            param_grid = {
+                'n_estimators': [200, 300, 400, 500],
+                'max_depth': [8, 9, 10, 11, 12],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4]
+            }
+        elif model_name == 'logistic_regression':
+            model = LogisticRegression(random_state=42, max_iter=1000)
+            param_grid = {
+                'C': [0.01, 0.1, 1, 10, 100],
+                'penalty': ['l1', 'l2'],
+                'solver': ['liblinear']
+            }
+        elif model_name == 'xgboost':
+            model = xgb.XGBClassifier(random_state=42, verbosity=0)
+            param_grid = {
+                'max_depth': [3, 5, 7],
+                'learning_rate': [0.01, 0.1, 0.2],
+                'n_estimators': [100, 200, 300],
+                'subsample': [0.8, 1.0],
+                'colsample_bytree': [0.8, 1.0],
+                'reg_alpha': [0, 1],
+                'reg_lambda': [1, 5]
+            }
+
+        print(f"Tuning {model} model...")
+
+         # Define cross-validation strategy
+        cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2, random_state=42)
+            
+        # Set up GridSearchCV
+        grid_search = GridSearchCV(estimator=model, 
+                                    param_grid=param_grid, 
+                                    scoring='accuracy', cv=cv, 
+                                    n_jobs=1)
+        
+        # Scale features if necessary
+        if "logistic" in model_name:
+            X_train_selected = StandardScaler().fit_transform(X_train_selected)
+            X_test_selected = StandardScaler().fit_transform(X_test_selected)
+            
+        # Fit grid search
+        grid_search.fit(X_train_selected, y_train)
+
+        # Print results
+        print(f"Best parameters for {model_name}: {grid_search.best_params_}")
+        print(f"Best cross-validation accuracy for {model_name}: {grid_search.best_score_:.4f}")
+        test_score = grid_search.score(X_test_selected, y_test)
+        print(f"Test set accuracy for {model_name}: {test_score:.4f}")
+
+        final_model = grid_search.best_estimator_
+
+        return final_model
+
+    def train_model(self, 
                      dataset, 
-                     models=['Gradient Boosting', 'Decision Tree', 'Random Forest', 'Logistic Regression', 'XGBoost']):
-        results = {}
+                     model_name = 'random_forest',
+                     model_label = None,
+                     create_model_package = True,
+                     score_model = True,
+                     model_target='home_win'):
+        
+        # Create default model label if not provided
+        if model_label is None:
+            model_label = f'{model_name}_{datetime.datetime.now().strftime("%Y%m%d")}'
 
-        for model_name in models:
-            if model_name not in self.model_features:
-                print(f"No features selected for model {model_name}. Skipping training.")
-                continue
+        # Check if model is available
+        if model_name not in self.available_models:
+            print(f"{model_name} is not available for training. Skipping...")
+            return None
 
-            features = self.model_features[model_name]
-            X = dataset[features].fillna(dataset[features].mean())
+        # Remove columns with NaN values or constant values
+        dataset = dataset.loc[:, dataset.var() > 0]
+        dataset = dataset.fillna(dataset.mean())
+
+        # Split dataset into features and target
+        X = dataset.drop(columns=['home_spread_covered', 'home_win', 'game_id'], axis=1)
+        if model_target == 'home_spread_covered':
+            y = dataset['home_spread_covered']
+        else:
             y = dataset['home_win']
 
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        # Perform train_test_split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, 
+            y, 
+            test_size=0.2, 
+            random_state=42, 
+            stratify=dataset['home_win']
+        )
 
+        # Select model features using RFECV
+        model_features = self.select_features(X_train=X_train, y_train=y_train, model_name=model_name)
 
-            if model_name == 'Gradient Boosting':
-                model = GradientBoostingClassifier(
-                    n_estimators=100,
-                    learning_rate=0.1,
-                    max_depth=3,
-                    random_state=42
-                )
-            elif model_name == 'Decision Tree':
-                model = DecisionTreeClassifier(
-                    max_depth=5,
-                    random_state=42
-                )
-            elif model_name == 'Random Forest':
-                model = RandomForestClassifier(
-                    n_estimators=100,
-                    max_depth=5,
-                    random_state=42
-                )
-            elif model_name == 'Logistic Regression':
-                model = LogisticRegression(
-                    max_iter=1000,
-                    random_state=42
-                )
-            elif model_name == 'XGBoost':
-                model = xgb.XGBClassifier(
-                    n_estimators=100,
-                    learning_rate=0.1,
-                    max_depth=3,
-                    random_state=42,
-                    verbosity=0
-                )
-            else:
-                model = xgb.XGBClassifier(
-                    n_estimators=100,
-                    learning_rate=0.1,
-                    max_depth=3,
-                    random_state=42,
-                    verbosity=0
-                )
+        # Tune model hyperparameters using GridSearchCV
+        model = self.tune_model(X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+                                model_features=model_features, model_name=model_name)
 
+        # Score model if specified
+        model_scores = {}
+        if score_model:
+            print(f"Scoring {model_name} model labeled {model_label}...")
+
+            # Specify CV strategy
             cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2, random_state=42)
-            if "Logistic" in model_name:
+
+            # Scale features if necessary
+            if "logistic" in model_name:
                 X_train = StandardScaler().fit_transform(X_train)
                 X_test = StandardScaler().fit_transform(X_test)
 
+            # Score model and print/save scores
             scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='accuracy', n_jobs=1)
-            results[model_name] = {
+            model_scores = {
                 "mean_accuracy": np.mean(scores),
                 "std_accuracy": np.std(scores),
                 "scores": scores
             }
+            print(f"{model_label}: Mean Accuracy = {scores.mean():.4f}, Std = {scores.std():.4f}")
 
-            print(f"{model_name}: Mean Accuracy = {scores.mean():.4f}, Std = {scores.std():.4f}")
-
-        return models, results
-
-    def tune_model(self, 
-                   X_train, y_train, X_test, y_test,
-                   models=['Gradient Boosting', 'Decision Tree', 'Random Forest', 'Logistic Regression', 'XGBoost']):
-
-        for model_name in models:
-            if model_name not in self.model_features:
-                print(f"Model {model_name} not recognized. Skipping.")
-                continue
-
-            X_train_selected = X_train[self.model_features[model_name]]
-            X_test_selected = X_test[self.model_features[model_name]]
-
-            if model_name == 'Gradient Boosting':
-                model = GradientBoostingClassifier(random_state=42)
-                param_grid = {
-                    'n_estimators': [200, 300, 400, 500],
-                    'learning_rate': [0.01, 0.1, 0.2],
-                    'max_depth': [8, 9, 10, 11, 12]
-                }
-            elif model_name == 'Decision Tree':
-                model = DecisionTreeClassifier(random_state=42)
-                param_grid = {
-                    'criterion': ['gini', 'entropy'],
-                    'max_depth': [5, 10, 15, 20, 25],
-                    'min_samples_split': [2, 5, 10, 20],
-                    'min_samples_leaf': [1, 2, 5, 10]
-                }
-            elif model_name == 'Random Forest':
-                model = RandomForestClassifier(random_state=42)
-                param_grid = {
-                    'n_estimators': [200, 300, 400, 500],
-                    'max_depth': [8, 9, 10, 11, 12],
-                    'min_samples_split': [2, 5, 10],
-                    'min_samples_leaf': [1, 2, 4]
-                }
-            elif model_name == 'Logistic Regression':
-                model = LogisticRegression(random_state=42, max_iter=1000)
-                param_grid = {
-                    'C': [0.01, 0.1, 1, 10, 100],
-                    'penalty': ['l1', 'l2'],
-                    'solver': ['liblinear']
-                }
-            elif model_name == 'XGBoost':
-                model = xgb.XGBClassifier(random_state=42, verbosity=0)
-                param_grid = {
-                    'max_depth': [3, 5, 7],
-                    'learning_rate': [0.01, 0.1, 0.2],
-                    'n_estimators': [100, 200, 300],
-                    'subsample': [0.8, 1.0],
-                    'colsample_bytree': [0.8, 1.0],
-                    'reg_alpha': [0, 1],
-                    'reg_lambda': [1, 5]
-                }
-
-
-            # Hyperparameter tuning logic would go here
-            print(f"Tuning model {model}...")
-
-            # Define cross-validation strategy
-            cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2, random_state=42)
-            
-            # Set up GridSearchCV
-            grid_search = GridSearchCV(estimator=model, 
-                                       param_grid=param_grid, 
-                                       scoring='accuracy', cv=cv, 
-                                       n_jobs=1)
-            
-            if "Logistic" in model_name:
-                X_train_selected = StandardScaler().fit_transform(X_train_selected)
-                X_test_selected = StandardScaler().fit_transform(X_test_selected)
-            
-            grid_search.fit(X_train_selected, y_train)
-
-            print(f"Best parameters for {model_name}: {grid_search.best_params_}")
-            print(f"Best cross-validation accuracy for {model_name}: {grid_search.best_score_:.4f}")
-
-            test_score = grid_search.score(X_test_selected, y_test)
-            print(f"Test set accuracy for {model_name}: {test_score:.4f}")
-
-            self.models[model_name] = grid_search.best_estimator_
+        # Save and return model package if specified
+        if create_model_package:
+            dataset_csv = self.dataset_df_to_csv(dataset)
+            model_package = Model_Package(model_label,
+                                            model_name,
+                                            model,
+                                            model_features,
+                                            model_scores,
+                                            dataset_csv,
+                                            model_target)
+            print(f"Succesfully trained {model_name} model. Saved as package labeled {model_label}.")
+            return model_package
+        
+        # Return model
+        return model
 
     def predict_games(self, 
                  dataset, schedule_data,
                  season, week,
-                 model_name='XGBoost'
+                 model_package: Model_Package,
+                 save_to_csv=True
                  ):
         
-        # Check if model is trained
-        if not (model_name in self.models and model_name in self.model_features):
-            print(f"Model {model_name} not trained. Skipping predictions.")
-            return None
+        # Make sure model package exists
+        if model_package is None:
+            print(f"Model package does not exist. Unable to predict NFL {season} week {week} games.")
         
+        # Obtain model from model package
+        model = model_package.model
+
+        # List for storing predictions
         predictions = []
 
         # Prepare schedule data for the specified week
         schedule_data = schedule_data[["home_team", "away_team", "season", "week", "home_rest", "away_rest", "spread_line"]]
         games = schedule_data[(schedule_data['season'] == season) & (schedule_data['week'] == week)]
 
-        # Create features for each game
+        # Create features for each upcoming game
         for _, game in games.iterrows():
             home_team = game['home_team']
             away_team = game['away_team']
@@ -487,62 +559,80 @@ class NFLPredictor:
             game_features['spread'] = spread
             game_df = pd.DataFrame([game_features])
 
-            features = self.model_features[model_name]
+            features = model_package.model_features
             X_pred = game_df[features]
-            if "Logistic" in model_name:
+            if "logistic" in model_package.model_name:
                 X_pred = StandardScaler().fit_transform(X_pred)
             
-            probability = self.models[model_name].predict_proba(X_pred)[:, 1][0]
-            prediction = self.models[model_name].predict(X_pred)[0]
-            pred_str = f"{home_team} WIN" if prediction == 1 else f"{away_team} WIN"
+            probability = model.predict_proba(X_pred)[:, 1][0]
+            prediction = model.predict(X_pred)[0]
 
+            pred_str = ""
+            if model_package.target_column == 'home_win':
+                pred_str = f"{home_team} WINS" if prediction == 1 else f"{away_team} WINS"
+            elif model_package.target_column == 'home_spread_covered':
+                if prediction == 1:
+                    pred_str = "PUSH"
+                elif prediction == 2:
+                    pred_str = f"{home_team} COVERS SPREAD ({-1 * spread})"
+                elif prediction == 0:
+                    pred_str = f"{away_team} COVERS SPREAD ({spread})"
+                else:
+                    print(f"Error predicting spread outcome. Skipping game {home_team} VS {away_team}.")
+                    continue
 
             predictions.append({
                 "season": season,
                 "week": week,
                 "home_team": home_team,
                 "away_team": away_team,
-                "winner": pred_str,
+                "prediction_str": pred_str,
                 "home_probability": probability,
                 "away_probability": 1 - probability,
                 "prediction": prediction
             })
 
-        return pd.DataFrame(predictions)     
+        predictions_df = pd.DataFrame(predictions)
+
+        if save_to_csv:
+            predictions_df.to_csv(f"NFL_{season}_week{week}_{model_package.target_column}_predictions_by_{model_package.label}.csv",
+                                      index=False)
+            
+        return predictions_df
+
+    def save_model_package(self, model_package):
+        try:
+            import joblib
+            joblib.dump(model_package, model_package.label)
+            print(f"Model package {model_package.label} saved.")
+        except ImportError as e:
+            print(f"Failed to import joblib. Make sure it is installed using 'uv add joblib'.")
+        except Exception as e:
+            print(f"Model not saved due to error: {e}")
 
 def main():
-    nfl_pred = NFLPredictor()
+    nfl_pred = NFL_Predictor()
     weekly_data, team_dict, schedule_data = nfl_pred.import_data(2015, 2025)
 
-    models = ['XGBoost', 'Random Forest']
+    models = ['xgboost', 'random_forest']
+    targets = ['home_win', 'home_spread_covered']
 
     dataset = nfl_pred.create_dataset(weekly_data, schedule_data)
 
-    # Remove columns with NaN values or constant values
-    dataset = dataset.loc[:, dataset.var() > 0]
-    dataset = dataset.fillna(dataset.mean())
+    for model in models:
+        for target in targets:
+            model_package = nfl_pred.train_model(dataset=dataset,
+                                                 model_name=model,
+                                                 model_target=target)
+            
+            predictions = nfl_pred.predict_games(dataset=dataset,
+                                                 schedule_data=schedule_data,
+                                                 season=2025, week=8,
+                                                 model_package=model_package)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        dataset.drop('home_win', axis=1), 
-        dataset['home_win'], 
-        test_size=0.2, 
-        random_state=42, 
-        stratify=dataset['home_win']
-    )
-
-    nfl_pred.select_features(X_train, y_train, min_features=5, models=models)
-
-    nfl_pred.tune_model(X_train, y_train, X_test, y_test, models=models)
-
-    for model_name in models:
-        predictions = nfl_pred.predict_games(weekly_data, schedule_data, season=2025, week=7, model_name=model_name)
-        if predictions is not None:
-            print(f"\nPredictions for Week 7, 2025 using {model_name}:")
-            print(predictions)
-
-            # Save predictions to CSV
-            predictions.to_csv(f"nfl_2025_week7_predictions_{model_name}.csv", index=False)
+                            
 
 
+    
 if __name__ == "__main__":
     main()
