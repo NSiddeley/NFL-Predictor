@@ -249,7 +249,7 @@ class NFL_Predictor:
             game_features['home_win'] = 1 if home_score > away_score else 0
             game_features['home_rest'] = home_rest
             game_features['away_rest'] = away_rest
-            game_features['game_id'] = game['game_id']
+            #game_features['game_id'] = game['game_id']
             game_features['spread'] = spread
 
             dataset.append(game_features)
@@ -264,7 +264,7 @@ class NFL_Predictor:
         
         # Set default file name if not provided
         if file_name is None:
-            file_name = f'nfl_game_dataset_{datetime.now().strftime("%Y%m%d")}.csv'
+            file_name = f'nfl_game_dataset_{datetime.datetime.now().strftime("%Y%m%d")}.csv'
 
         # Save dataset to CSV
         try:
@@ -358,8 +358,8 @@ class NFL_Predictor:
             return None
 
         # Reformat feature set to selected features for given model
-        X_train_selected = X_train[model_features[model_name]]
-        X_test_selected = X_test[model_features[model_name]]
+        X_train_selected = X_train[model_features]
+        X_test_selected = X_test[model_features]
 
         # Select base model
         if model_name == 'gradient_boosting':
@@ -450,12 +450,13 @@ class NFL_Predictor:
             print(f"{model_name} is not available for training. Skipping...")
             return None
 
-        # Remove columns with NaN values or constant values
+        print(f"Starting training for {model_name} model")
+        # Remove columns with NaN values or constant values and 'game_id' column 
         dataset = dataset.loc[:, dataset.var() > 0]
         dataset = dataset.fillna(dataset.mean())
 
         # Split dataset into features and target
-        X = dataset.drop(columns=['home_spread_covered', 'home_win', 'game_id'], axis=1)
+        X = dataset.drop(columns=['home_spread_covered', 'home_win'], axis=1)
         if model_target == 'home_spread_covered':
             y = dataset['home_spread_covered']
         else:
@@ -516,7 +517,8 @@ class NFL_Predictor:
         return model
 
     def predict_games(self, 
-                 dataset, schedule_data,
+                 dataset, 
+                 weekly_data, schedule_data,
                  season, week,
                  model_package: Model_Package,
                  save_to_csv=True
@@ -544,7 +546,7 @@ class NFL_Predictor:
             away_rest = game['away_rest']
             spread = game['spread_line']
 
-            team_features = self.create_team_features(dataset, season, week)
+            team_features = self.create_team_features(weekly_data, season, week)
             if team_features is None:
                 continue
 
@@ -611,12 +613,13 @@ class NFL_Predictor:
             print(f"Model not saved due to error: {e}")
 
 def main():
+    
     nfl_pred = NFL_Predictor()
     weekly_data, team_dict, schedule_data = nfl_pred.import_data(2015, 2025)
 
     models = ['xgboost', 'random_forest']
     targets = ['home_win', 'home_spread_covered']
-
+    
     dataset = nfl_pred.create_dataset(weekly_data, schedule_data)
 
     for model in models:
@@ -626,10 +629,11 @@ def main():
                                                  model_target=target)
             
             predictions = nfl_pred.predict_games(dataset=dataset,
+                                                 weekly_data=weekly_data,
                                                  schedule_data=schedule_data,
                                                  season=2025, week=8,
                                                  model_package=model_package)
-
+    
                             
 
 
