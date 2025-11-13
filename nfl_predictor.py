@@ -1,4 +1,3 @@
-'''
 import nfl_data_py as nfl
 import nflreadpy as nflr
 import pandas as pd
@@ -606,34 +605,3 @@ class NFL_Predictor:
             print(f"Failed to import joblib. Make sure it is installed using 'uv add joblib'.")
         except Exception as e:
             print(f"Model not saved due to error: {e}")
-'''
-from nfl_predictor import NFL_Predictor, Model_Package
-
-def main():
-    
-    nfl_pred = NFL_Predictor()
-    weekly_data, team_dict, schedule_data = nfl_pred.import_data(2015, 2025)
-
-    models = ['xgboost', 'random_forest']
-    targets = ['home_win', 'home_spread_covered']
-    
-    dataset = nfl_pred.create_dataset(weekly_data, schedule_data)
-
-    for model in models:
-        for target in targets:
-            model_package = nfl_pred.train_model(dataset=dataset,
-                                                 model_name=model,
-                                                 model_target=target)
-            
-            predictions = nfl_pred.predict_games(dataset=dataset,
-                                                 weekly_data=weekly_data,
-                                                 schedule_data=schedule_data,
-                                                 season=2025, week=8,
-                                                 model_package=model_package)
-    
-                            
-
-
-    
-if __name__ == "__main__":
-    main()
