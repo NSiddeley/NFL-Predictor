@@ -30,7 +30,8 @@ class Model_Package:
                  model_features,
                  model_scores,
                  dataset_used,
-                 target_column):
+                 target_column,
+                 date_trained):
         
         self.label = package_label
         self.model_name = model_name
@@ -39,6 +40,7 @@ class Model_Package:
         self.model_scores = model_scores
         self.dataset_used = dataset_used
         self.target_column = target_column
+        self.date_trained = date_trained
 
 class NFL_Predictor:
     def __init__(self, current_season=2025):
@@ -202,7 +204,8 @@ class NFL_Predictor:
         return game_features
     
     def create_dataset(self, 
-                       weekly_data, schedule_data):
+                       weekly_data, schedule_data,
+                       return_type = "df"):
         
         dataset = []
 
@@ -248,9 +251,13 @@ class NFL_Predictor:
 
             dataset.append(game_features)
 
-        # Convert dataset to DataFrame and return it
-        dataset_df = pd.DataFrame(dataset)
-        return dataset_df
+        
+        if return_type == "df":
+            # Convert dataset to DataFrame and return it
+            return pd.DataFrame(dataset)
+        else:
+            # Return dataset as a list of dictionaries
+            return dataset
     
     def dataset_df_to_csv(self, 
                         dataset_df, 
@@ -496,15 +503,18 @@ class NFL_Predictor:
 
         # Save and return model package if specified
         if create_model_package:
-            dataset_csv = self.dataset_df_to_csv(dataset)
-            model_package = Model_Package(model_label,
-                                            model_name,
-                                            model,
-                                            model_features,
-                                            model_scores,
-                                            dataset_csv,
-                                            model_target)
-            print(f"Succesfully trained {model_name} model. Saved as package labeled {model_label}.")
+            encoded_model = self.encode_model(model)
+            list_of_dicts = dataset.to_dict(orient='records')
+            model_package = {
+                "package_label": model_label,
+                "model": encoded_model,
+                "model_features": model_features,
+                "model_scores": model_scores,
+                "dataset": list_of_dicts,
+                "model_target": model_target,
+                "date_trained": datetime.date.today().strftime("%m-%d-%Y")
+            }
+
             return model_package
         
         # Return model
@@ -563,45 +573,91 @@ class NFL_Predictor:
             probability = model.predict_proba(X_pred)[:, 1][0]
             prediction = model.predict(X_pred)[0]
 
-            pred_str = ""
-            if model_package.target_column == 'home_win':
-                pred_str = f"{home_team} WINS" if prediction == 1 else f"{away_team} WINS"
-            elif model_package.target_column == 'home_spread_covered':
-                if prediction == 1:
-                    pred_str = "PUSH"
-                elif prediction == 2:
-                    pred_str = f"{home_team} COVERS SPREAD ({-1 * spread})"
-                elif prediction == 0:
-                    pred_str = f"{away_team} COVERS SPREAD ({spread})"
-                else:
-                    print(f"Error predicting spread outcome. Skipping game {home_team} VS {away_team}.")
-                    continue
-
             predictions.append({
                 "season": season,
                 "week": week,
                 "home_team": home_team,
                 "away_team": away_team,
-                "prediction_str": pred_str,
-                "home_probability": probability,
-                "away_probability": 1 - probability,
-                "prediction": prediction
+                "home_win": True if prediction == 1 else False,
+                "confidence": probability,
+                "model_used": model_package.label,
+                "is_correct": None
             })
 
-        predictions_df = pd.DataFrame(predictions)
-
         if save_to_csv:
-            predictions_df.to_csv(f"NFL_{season}_week{week}_{model_package.target_column}_predictions_by_{model_package.label}.csv",
+            pd.DataFrame(predictions).to_csv(f"NFL_{season}_week{week}_{model_package.target_column}_predictions_by_{model_package.label}.csv",
                                       index=False)
             
-        return predictions_df
+        return predictions
 
-    def save_model_package(self, model_package):
+    def encode_model(self, model) -> str:
+        """
+        Serialize a sklearn model using joblib and encode it to a base64 string.
+
+        Args:
+            model: A trained sklearn model object
+
+        Returns:
+            str: Base64 encoded string representation of the model
+        """
         try:
             import joblib
-            joblib.dump(model_package, model_package.label)
-            print(f"Model package {model_package.label} saved.")
+            import base64
+            from io import BytesIO
+
+            # Create a BytesIO buffer to hold the serialized model
+            buffer = BytesIO()
+
+            # Serialize the model to the buffer using joblib
+            joblib.dump(model, buffer)
+
+            # Get the bytes from the buffer
+            buffer.seek(0)
+            model_bytes = buffer.read()
+
+            # Encode to base64
+            encoded_model = base64.b64encode(model_bytes).decode('utf-8')
+
+            print(f"Model successfully encoded to base64 string (length: {len(encoded_model)})")
+            return encoded_model
+
         except ImportError as e:
-            print(f"Failed to import joblib. Make sure it is installed using 'uv add joblib'.")
+            print(f"Failed to import required libraries. Make sure joblib is installed using 'uv add joblib'.")
+            return None
         except Exception as e:
-            print(f"Model not saved due to error: {e}")
+            print(f"Error encoding model: {e}")
+            return None
+
+    def decode_model(self, encoded_model_str: str):
+        """
+        Decode a base64 string and deserialize it back to a sklearn model.
+
+        Args:
+            encoded_model_str: Base64 encoded string representation of a model
+
+        Returns:
+            The deserialized sklearn model object
+        """
+        try:
+            import joblib
+            import base64
+            from io import BytesIO
+
+            # Decode the base64 string to bytes
+            model_bytes = base64.b64decode(encoded_model_str)
+
+            # Create a BytesIO buffer from the bytes
+            buffer = BytesIO(model_bytes)
+
+            # Deserialize the model from the buffer using joblib
+            model = joblib.load(buffer)
+
+            print(f"Model successfully decoded from base64 string")
+            return model
+
+        except ImportError as e:
+            print(f"Failed to import required libraries. Make sure joblib is installed using 'uv add joblib'.")
+            return None
+        except Exception as e:
+            print(f"Error decoding model: {e}")
+            return None

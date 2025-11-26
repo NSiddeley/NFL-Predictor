@@ -608,16 +608,22 @@ class NFL_Predictor:
             print(f"Model not saved due to error: {e}")
 '''
 from nfl_predictor import NFL_Predictor, Model_Package
+from nfl_predictions_client import NFLPredictionsClient
+import os
+from dotenv import load_dotenv
 
 def main():
     
     nfl_pred = NFL_Predictor()
     weekly_data, team_dict, schedule_data = nfl_pred.import_data(2015, 2025)
 
-    models = ['xgboost', 'random_forest']
-    targets = ['home_win', 'home_spread_covered']
+    models = ['random_forest']
+    targets = ['home_win']
+    weeks_to_predict = [6,7,8,9,10,11,12]
     
     dataset = nfl_pred.create_dataset(weekly_data, schedule_data)
+
+    all_predictions = []
 
     for model in models:
         for target in targets:
@@ -625,13 +631,19 @@ def main():
                                                  model_name=model,
                                                  model_target=target)
             
-            predictions = nfl_pred.predict_games(dataset=dataset,
-                                                 weekly_data=weekly_data,
-                                                 schedule_data=schedule_data,
-                                                 season=2025, week=8,
-                                                 model_package=model_package)
+            for week in weeks_to_predict:
+
+                predictions = nfl_pred.predict_games(dataset=dataset,
+                                                    weekly_data=weekly_data,
+                                                    schedule_data=schedule_data,
+                                                    season=2025, week=week,
+                                                    model_package=model_package)
+                
+                all_predictions.extend(predictions)
+                print(all_predictions)
     
-                            
+    base_url = os.getenv("API_URL")
+    api_client = NFLPredictionsClient()
 
 
     
