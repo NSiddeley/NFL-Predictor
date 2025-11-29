@@ -21,27 +21,6 @@ from sklearn.tree import DecisionTreeClassifier
 # XGBoost import
 import xgboost as xgb
 
-
-class Model_Package:
-    def __init__(self,
-                 package_label,
-                 model_name,
-                 model,
-                 model_features,
-                 model_scores,
-                 dataset_used,
-                 target_column,
-                 date_trained):
-        
-        self.label = package_label
-        self.model_name = model_name
-        self.model = model
-        self.model_features = model_features
-        self.model_scores = model_scores
-        self.dataset_used = dataset_used
-        self.target_column = target_column
-        self.date_trained = date_trained
-
 class NFL_Predictor:
     def __init__(self, current_season=2025):
         self.available_models = ['random_forest', 'gradient_boosting', 'decision_tree', 'logistic_regression', 'xgboost']
@@ -444,7 +423,7 @@ class NFL_Predictor:
         
         # Create default model label if not provided
         if model_label is None:
-            model_label = f'{model_name}_{datetime.datetime.now().strftime("%Y%m%d")}'
+            model_label = f'{model_name}_{datetime.datetime.now().strftime("%m_%d_%Y")}'
 
         # Check if model is available
         if model_name not in self.available_models:
@@ -495,9 +474,9 @@ class NFL_Predictor:
             # Score model and print/save scores
             scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='accuracy', n_jobs=1)
             model_scores = {
-                "mean_accuracy": np.mean(scores),
-                "std_accuracy": np.std(scores),
-                "scores": scores
+                "mean_accuracy": float(np.mean(scores)),
+                "std_accuracy": float(np.std(scores)),
+                "scores": scores.tolist()  # Convert numpy array to Python list
             }
             print(f"{model_label}: Mean Accuracy = {scores.mean():.4f}, Std = {scores.std():.4f}")
 
@@ -520,11 +499,10 @@ class NFL_Predictor:
         # Return model
         return model
 
-    def predict_games(self, 
-                 dataset, 
+    def predict_games(self,  
                  weekly_data, schedule_data,
                  season, week,
-                 model_package: Model_Package,
+                 model_package: dict,
                  save_to_csv=True
                  ):
         
@@ -533,7 +511,8 @@ class NFL_Predictor:
             print(f"Model package does not exist. Unable to predict NFL {season} week {week} games.")
         
         # Obtain model from model package
-        model = model_package.model
+        encoded_model = model_package["model"]
+        model = self.decode_model(encoded_model)
 
         # List for storing predictions
         predictions = []
@@ -565,9 +544,9 @@ class NFL_Predictor:
             game_features['spread'] = spread
             game_df = pd.DataFrame([game_features])
 
-            features = model_package.model_features
+            features = model_package["model_features"]
             X_pred = game_df[features]
-            if "logistic" in model_package.model_name:
+            if "logistic" in model_package["package_label"]:
                 X_pred = StandardScaler().fit_transform(X_pred)
             
             probability = model.predict_proba(X_pred)[:, 1][0]
@@ -580,7 +559,7 @@ class NFL_Predictor:
                 "away_team": away_team,
                 "home_win": True if prediction == 1 else False,
                 "confidence": probability,
-                "model_used": model_package.label,
+                "model_used": model_package["package_label"],
                 "is_correct": None
             })
 

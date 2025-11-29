@@ -8,6 +8,8 @@ Supports creating predictions, reading predictions, and updating prediction resu
 import requests
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from models.ml_model_packages import CreateMLModelPackageRequest, MLModelPackage
+from models.predictions import CreatePredictionRequest, Prediction
 
 
 class NFLPredictionsClient:
@@ -22,6 +24,7 @@ class NFLPredictionsClient:
         """
         self.base_url = base_url.rstrip('/')
         self.predictions_endpoint = f"{self.base_url}/predictions"
+        self.models_endpoint = f"{self.base_url}/models"
 
     def health_check(self) -> Dict[str, Any]:
         """
@@ -36,44 +39,30 @@ class NFLPredictionsClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             return {"error": str(e), "status": "unhealthy"}
-
-    def create_prediction(
-        self,
-        season: int,
-        week: int,
-        home_team: str,
-        away_team: str,
-        home_win: bool,
-        confidence: float,
-        model_used: str,
-        is_correct: Optional[bool] = None
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def create_prediction(self, 
+        prediction: CreatePredictionRequest
     ) -> Dict[str, Any]:
         """
         Create a new prediction.
 
         Args:
-            season: NFL season year (1920-2050)
-            week: Week number (1-22, where 1-18 are regular season, 19-22 are playoffs)
-            home_team: Home team name (1-100 characters)
-            away_team: Away team name (1-100 characters, must differ from home_team)
-            home_win: True if predicting home team wins, False if away team wins
-            confidence: Confidence level (0.0-1.0)
-            model_used: Name/identifier of the ML model used (1-100 characters)
-            is_correct: Whether prediction was correct (None before game, True/False after)
+            CreatePredictionRequest pydantic model with the following fields:
+            - season: NFL season year
+            - week: Week number (1-22, where 1-18 are regular season, 19-22 are playoffs)
+            - home_team: Home team name (1-100 characters)
+            - away_team: Away team name (1-100 characters, must differ from home_team)
+            - home_win: True if predicting home team wins, False if away team wins
+            - confidence: Confidence level (0.0-1.0)
+            - model_used: Name/identifier of the ML model used (1-100 characters)
+            - is_correct: Whether prediction was correct (None before game, True/False after)
 
         Returns:
             dict: Created prediction with pred_id
         """
-        payload = {
-            "season": season,
-            "week": week,
-            "home_team": home_team,
-            "away_team": away_team,
-            "home_win": home_win,
-            "confidence": confidence,
-            "model_used": model_used,
-            "is_correct": is_correct
-        }
+        payload = prediction.model_dump()
 
         try:
             response = requests.post(
@@ -86,9 +75,10 @@ class NFLPredictionsClient:
             return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
         except requests.exceptions.RequestException as e:
             return {"error": str(e)}
-
-    def get_all_predictions(
-        self,
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def get_all_predictions(self,
         season: Optional[int] = None,
         week: Optional[int] = None,
         team: Optional[str] = None
@@ -123,8 +113,12 @@ class NFLPredictionsClient:
             return [{"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}]
         except requests.exceptions.RequestException as e:
             return [{"error": str(e)}]
-
-    def get_prediction_by_id(self, prediction_id: str) -> Dict[str, Any]:
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def get_prediction_by_id(self, 
+        prediction_id: str
+    ) -> Dict[str, Any]:
         """
         Get a specific prediction by its ID.
 
@@ -144,18 +138,13 @@ class NFLPredictionsClient:
             return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
         except requests.exceptions.RequestException as e:
             return {"error": str(e)}
-
+        except Exception as e:
+            return {"error": str(e)}
+        
     def update_prediction(
         self,
         prediction_id: str,
-        season: int,
-        week: int,
-        home_team: str,
-        away_team: str,
-        home_win: bool,
-        confidence: float,
-        model_used: str,
-        is_correct: Optional[bool] = None
+        new_prediction: CreatePredictionRequest
     ) -> Dict[str, Any]:
         """
         Update an existing prediction.
@@ -174,16 +163,7 @@ class NFLPredictionsClient:
         Returns:
             dict: Updated prediction
         """
-        payload = {
-            "season": season,
-            "week": week,
-            "home_team": home_team,
-            "away_team": away_team,
-            "home_win": home_win,
-            "confidence": confidence,
-            "model_used": model_used,
-            "is_correct": is_correct
-        }
+        payload = new_prediction.model_dump()
 
         try:
             response = requests.put(
@@ -195,6 +175,8 @@ class NFLPredictionsClient:
         except requests.exceptions.HTTPError as e:
             return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
         except requests.exceptions.RequestException as e:
+            return {"error": str(e)}
+        except Exception as e:
             return {"error": str(e)}
 
     def update_prediction_result(
@@ -234,7 +216,9 @@ class NFLPredictionsClient:
             is_correct=is_correct
         )
 
-    def delete_prediction(self, prediction_id: str) -> Dict[str, Any]:
+    def delete_prediction(self, 
+        prediction_id: str
+    ) -> Dict[str, Any]:
         """
         Delete a specific prediction.
 
@@ -254,6 +238,8 @@ class NFLPredictionsClient:
             return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
         except requests.exceptions.RequestException as e:
             return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e)}
 
     def delete_all_predictions(self) -> Dict[str, Any]:
         """
@@ -271,6 +257,8 @@ class NFLPredictionsClient:
         except requests.exceptions.HTTPError as e:
             return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
         except requests.exceptions.RequestException as e:
+            return {"error": str(e)}
+        except Exception as e:
             return {"error": str(e)}
 
     def get_predictions_by_team(self, team_name: str) -> List[Dict[str, Any]]:
@@ -339,6 +327,164 @@ class NFLPredictionsClient:
                 "week": week
             }
         }
+    
+    def create_model_package(self, 
+        model_package: CreateMLModelPackageRequest
+    ) -> Dict[str, Any]:
+        """
+        Create a new model package.
+
+        Args:
+            CreateMLModelPackageRequest pydantic model with the following fields:
+            - package_label: ML model package label
+            - model: Trained sklearn ML model (encoded as base64 str)
+            - odel_features: List of features the model expects
+            - model_scores: Dict of model scores
+            - dataset_csv: Dataset the model was trained on
+            - model_target: Target column of the model
+            - date_trained: Date the model was trained
+
+        Returns:
+            dict: Created package with package_id
+        """
+        payload = model_package.model_dump()
+
+        try:
+            response = requests.post(
+                f"{self.models_endpoint}/",
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
+        except requests.exceptions.RequestException as e:
+            return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def get_all_model_packages(self,
+        date_trained: Optional[str] = None,
+        label: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all packages with optional filters.
+
+        Args:
+            date_trained: Filter by date model was trained on
+            label: Filter by model package label
+
+        Returns:
+            list: List of packages matching the filters
+        """
+        params = {}
+        if date_trained is not None:
+            params["date_trained"] = date_trained
+        if label is not None:
+            params["label"] = label
+
+        try:
+            response = requests.get(
+                f"{self.models_endpoint}/",
+                params=params
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            return [{"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}]
+        except requests.exceptions.RequestException as e:
+            return [{"error": str(e)}]
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def get_model_package_by_id(self, 
+        package_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get a specific model package by its ID.
+
+        Args:
+            package_id: The package ID (MongoDB ObjectId)
+
+        Returns:
+            dict: Package details
+        """
+        try:
+            response = requests.get(
+                f"{self.models_endpoint}/{package_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
+        except requests.exceptions.RequestException as e:
+            return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def update_package(
+        self,
+        package_id: str,
+        new_package: CreateMLModelPackageRequest
+    ) -> Dict[str, Any]:
+        """
+        Update an existing model package.
+
+        Args:
+            prediction_id: The prediction ID to update
+
+            new_package: CreateMLModelPackageRequest pydantic model with the following fields:
+            - package_label: ML model package label
+            - model: Trained sklearn ML model (encoded as base64 str)
+            - odel_features: List of features the model expects
+            - model_scores: Dict of model scores
+            - dataset_csv: Dataset the model was trained on
+            - model_target: Target column of the model
+            - date_trained: Date the model was trained
+
+        Returns:
+            dict: Updated package
+        """
+        payload = new_package.model_dump()
+
+        try:
+            response = requests.put(
+                f"{self.models_endpoint}/{package_id}",
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
+        except requests.exceptions.RequestException as e:
+            return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def delete_package(self, 
+        package_id: str
+    ) -> Dict[str, Any]:
+        """
+        Delete a specific model package.
+
+        Args:
+            package_id: The package ID to delete
+
+        Returns:
+            dict: Deletion confirmation
+        """
+        try:
+            response = requests.delete(
+                f"{self.models_endpoint}/{package_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            return {"error": str(e), "status_code": e.response.status_code, "details": e.response.json()}
+        except requests.exceptions.RequestException as e:
+            return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e)}
 
 
 def main():
