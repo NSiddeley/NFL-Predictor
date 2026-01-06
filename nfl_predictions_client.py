@@ -1,8 +1,16 @@
 """
 NFL Predictions API Client
 
-A Python client for interacting with the NFL Predictions API.
-Supports creating predictions, reading predictions, and updating prediction results.
+A comprehensive Python client for interacting with the NFL Predictions API.
+
+This module provides a client class with methods for:
+- Creating, reading, updating, and deleting predictions
+- Managing ML model packages
+- Retrieving predictions by various filters (team, week, season)
+- Calculating accuracy statistics
+- Health checking the API
+
+All API communication uses the requests library with proper error handling.
 """
 
 import requests
@@ -13,7 +21,12 @@ from models.predictions import CreatePredictionRequest, Prediction
 
 
 class NFLPredictionsClient:
-    """Client for interacting with the NFL Predictions API."""
+    """
+    Client for interacting with the NFL Predictions API.
+
+    Provides a simple interface for all API operations including predictions
+    management, model package storage, and data retrieval.
+    """
 
     def __init__(self, base_url: str = "http://localhost:8000"):
         """

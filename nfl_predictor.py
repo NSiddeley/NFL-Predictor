@@ -1,3 +1,14 @@
+"""
+NFL Game Predictor using Machine Learning.
+
+This module provides the NFL_Predictor class which handles:
+- Importing NFL historical data
+- Creating feature sets from team statistics
+- Training various ML models (Random Forest, Gradient Boosting, XGBoost, etc.)
+- Making predictions for upcoming NFL games
+- Encoding/decoding models for storage
+"""
+
 import nfl_data_py as nfl
 import nflreadpy as nflr
 import pandas as pd
@@ -15,19 +26,38 @@ from sklearn.feature_selection import RFECV
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.tree import DecisionTreeClassifier
-#from sklearn.calibration import CalibratedClassifierCV
-#from sklearn.pipeline import Pipeline
 
 # XGBoost import
 import xgboost as xgb
 
 class NFL_Predictor:
+    """
+    Main class for NFL game prediction using machine learning.
+
+    This class provides methods for importing NFL data, creating features,
+    training models, and generating predictions for NFL games.
+    """
     def __init__(self, current_season=2025):
+        """
+        Initialize the NFL Predictor.
+
+        Args:
+            current_season: The current NFL season year (default: 2025)
+        """
         self.available_models = ['random_forest', 'gradient_boosting', 'decision_tree', 'logistic_regression', 'xgboost']
         self.current_season = current_season
-    
 
     def import_data(self, start_year=2014, end_year=2025):
+        """
+        Import NFL data including team stats, descriptions, and schedules.
+
+        Args:
+            start_year: First year to import data from (default: 2014)
+            end_year: Last year to import data from (default: 2025)
+
+        Returns:
+            Tuple of (weekly_data, team_dict, schedule_data)
+        """
         if end_year > self.current_season:
             end_year = self.current_season
 
@@ -66,10 +96,24 @@ class NFL_Predictor:
 
         return weekly_data, team_dict, schedule_data
 
-    def create_team_features(self, 
-                             weekly_data, 
-                             season, 
+    def create_team_features(self,
+                             weekly_data,
+                             season,
                              week):
+        """
+        Create aggregated feature statistics for each team up to a given week.
+
+        This calculates per-game averages for offensive, defensive, and special
+        teams statistics for each team based on games played before the specified week.
+
+        Args:
+            weekly_data: DataFrame containing weekly team statistics
+            season: NFL season year
+            week: Week number (features created from weeks before this)
+
+        Returns:
+            Dictionary mapping team names to their feature dictionaries
+        """
         
         season_data = weekly_data[(weekly_data['season'] == season) & (weekly_data['week'] < week)]
 
@@ -114,11 +158,29 @@ class NFL_Predictor:
 
         return team_features
 
-    def create_game_features(self, 
-                             team_features, 
-                             home_team, away_team, 
-                             season, week, 
+    def create_game_features(self,
+                             team_features,
+                             home_team, away_team,
+                             season, week,
                              is_playoff=False, is_neutral=False):
+        """
+        Create feature vector for a specific game matchup.
+
+        Combines team-level features for both home and away teams along with
+        game context information (playoff status, neutral site, etc.).
+
+        Args:
+            team_features: Dictionary of team features from create_team_features()
+            home_team: Home team abbreviation
+            away_team: Away team abbreviation
+            season: NFL season year
+            week: Week number
+            is_playoff: Whether this is a playoff game (default: False)
+            is_neutral: Whether played at neutral site (default: False)
+
+        Returns:
+            Dictionary of features for this specific game matchup
+        """
         
         if home_team not in team_features or away_team not in team_features:
             return None
@@ -182,9 +244,23 @@ class NFL_Predictor:
 
         return game_features
     
-    def create_dataset(self, 
+    def create_dataset(self,
                        weekly_data, schedule_data,
                        return_type = "df"):
+        """
+        Create a complete dataset for model training from historical games.
+
+        Iterates through all games in the schedule and creates feature vectors
+        along with outcomes for model training.
+
+        Args:
+            weekly_data: DataFrame of weekly team statistics
+            schedule_data: DataFrame of game schedules
+            return_type: Format to return ("df" for DataFrame, else list of dicts)
+
+        Returns:
+            DataFrame or list of dictionaries containing game features and outcomes
+        """
         
         dataset = []
 
@@ -230,17 +306,27 @@ class NFL_Predictor:
 
             dataset.append(game_features)
 
-        
+        # Return dataset in requested format
         if return_type == "df":
             # Convert dataset to DataFrame and return it
             return pd.DataFrame(dataset)
         else:
             # Return dataset as a list of dictionaries
             return dataset
-    
-    def dataset_df_to_csv(self, 
-                        dataset_df, 
+
+    def dataset_df_to_csv(self,
+                        dataset_df,
                         file_name=None):
+        """
+        Save dataset DataFrame to a CSV file.
+
+        Args:
+            dataset_df: DataFrame containing the dataset
+            file_name: Name of file to save (auto-generated if None)
+
+        Returns:
+            File handle if successful, None otherwise
+        """
         
         # Set default file name if not provided
         if file_name is None:
@@ -256,10 +342,24 @@ class NFL_Predictor:
             print(f"Error saving dataset to file: {e}")
 
 
-    def select_features(self, 
+    def select_features(self,
                         X_train, y_train,
-                        min_features=5, 
+                        min_features=5,
                         model_name = 'random_forest'):
+        """
+        Perform feature selection using Recursive Feature Elimination with Cross-Validation.
+
+        Uses RFECV to find the optimal subset of features for the specified model.
+
+        Args:
+            X_train: Training features DataFrame
+            y_train: Training labels
+            min_features: Minimum number of features to select (default: 5)
+            model_name: Type of model to use for selection (default: 'random_forest')
+
+        Returns:
+            List of selected feature names
+        """
 
         # List for storing selected features for model
         model_features = []
@@ -327,10 +427,27 @@ class NFL_Predictor:
 
         return model_features
     
-    def tune_model(self, 
+    def tune_model(self,
                    X_train, y_train, X_test, y_test,
                    model_features,
                    model_name='random_forest'):
+        """
+        Tune model hyperparameters using GridSearchCV.
+
+        Performs exhaustive search over specified parameter values to find
+        the best combination for the given model type.
+
+        Args:
+            X_train: Training features DataFrame
+            y_train: Training labels
+            X_test: Test features DataFrame
+            y_test: Test labels
+            model_features: List of feature names to use
+            model_name: Type of model to tune (default: 'random_forest')
+
+        Returns:
+            Best estimator from grid search, or None if model not recognized
+        """
 
         # Make sure model is available
         if model_name not in self.available_models:
@@ -413,13 +530,30 @@ class NFL_Predictor:
 
         return final_model
 
-    def train_model(self, 
-                     dataset, 
+    def train_model(self,
+                     dataset,
                      model_name = 'random_forest',
                      model_label = None,
                      create_model_package = True,
                      score_model = True,
                      model_target='home_win'):
+        """
+        Train a machine learning model on NFL game data.
+
+        Complete training pipeline including feature selection, hyperparameter tuning,
+        and model evaluation. Returns a model package ready for predictions or storage.
+
+        Args:
+            dataset: DataFrame containing game features and outcomes
+            model_name: Type of model to train (default: 'random_forest')
+            model_label: Label for the model package (auto-generated if None)
+            create_model_package: Whether to package the model (default: True)
+            score_model: Whether to evaluate model with cross-validation (default: True)
+            model_target: Target variable to predict (default: 'home_win')
+
+        Returns:
+            Model package dictionary if create_model_package=True, else trained model
+        """
         
         # Create default model label if not provided
         if model_label is None:
@@ -499,12 +633,29 @@ class NFL_Predictor:
         # Return model
         return model
 
-    def predict_games(self,  
+    def predict_games(self,
                  weekly_data, schedule_data,
                  season, week,
                  model_package: dict,
                  save_to_csv=True
                  ):
+        """
+        Generate predictions for all games in a specific week.
+
+        Uses the trained model to predict outcomes for each scheduled game,
+        creating features from team statistics up to that point in the season.
+
+        Args:
+            weekly_data: DataFrame of weekly team statistics
+            schedule_data: DataFrame of game schedules
+            season: NFL season year
+            week: Week number to predict
+            model_package: Dictionary containing trained model and metadata
+            save_to_csv: Whether to save predictions to CSV file (default: True)
+
+        Returns:
+            List of prediction dictionaries for each game
+        """
         
         # Make sure model package exists
         if model_package is None:
